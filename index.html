@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>[Terminal.] v8 — Bloomberg Live</title>
+<script src="https://unpkg.com/lightweight-charts@5.0.8/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
+
+:root{
+  --bg:#000;--panel:#0a0a0a;--header:#0d0d0d;
+  --border:#222;--border-amber:#ffaa00;
+  --amber:#ffaa00;--amber-dim:#8a5a00;
+  --text:#e0e0e0;--dim:#666;--cyan:#00d4ff;
+  --green:#00c853;--red:#ff1744;
+  --mono:'JetBrains Mono','SF Mono','Consolas',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:var(--bg);color:var(--text);
+  font-family:var(--mono);font-size:12px;line-height:1.35;overflow-x:hidden}
+
+/* ---- BOOT ---- */
+#boot{position:fixed;inset:0;background:#000;z-index:9999;
+  display:flex;align-items:center;justify-content:center;
+  transition:opacity .6s;cursor:pointer}
+#boot.hidden{opacity:0;pointer-events:none}
+#boot pre{color:var(--amber);font-size:13px;line-height:1.6;white-space:pre-wrap}
+
+/* ---- HEADER ---- */
+.hdr{display:flex;justify-content:space-between;align-items:center;
+  background:var(--header);border-bottom:2px solid var(--border-amber);
+  padding:6px 12px;position:sticky;top:0;z-index:100;flex-wrap:wrap;gap:6px}
+.logo{color:var(--amber);font-weight:700;font-size:14px;letter-spacing:1px}
+.clocks{display:flex;gap:20px;flex-wrap:wrap}
+.clk{color:var(--cyan);font-size:11px;font-weight:500}
+.hdr-right{display:flex;align-items:center;gap:8px}
+.dot{font-size:14px;animation:pulse 1.5s infinite;color:var(--dim)}
+.dot.live{color:var(--green)}
+.dot.dead{color:var(--red)}
+.status-txt{color:var(--dim);font-size:10px;text-transform:uppercase}
+.last-upd{color:var(--dim);font-size:10px;margin-left:6px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* ---- TICKER ---- */
+.tape{background:#0a0a0a;border-bottom:1px solid var(--border);
+  overflow:hidden;white-space:nowrap;padding:4px 0}
+.tape-inner{display:inline-block;animation:scroll 110s linear infinite;padding-left:100%}
+.tape-item{display:inline-block;margin-right:32px;font-size:11px}
+.tape-item .s{color:var(--amber);font-weight:700}
+.tape-item .p{color:var(--text);margin-left:5px}
+.tape-item .c{margin-left:4px}
+.tape-item .c.up{color:var(--green)}
+.tape-item .c.dn{color:var(--red)}
+@keyframes scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+
+/* ---- GRID ---- */
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  background:var(--border);padding:1px;min-height:calc(100vh - 110px)}
+.pnl{background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+.pnl.g2{grid-column:span 2}
+.pnl.g4{grid-column:span 4}
+.pnl.g1{grid-column:span 1}
+
+.pnl-hd{display:flex;justify-content:space-between;align-items:center;
+  padding:4px 8px;background:var(--header);border-bottom:1px solid var(--border-amber)}
+.pnl-title{color:var(--amber);font-weight:700;font-size:10px;letter-spacing:.8px;text-transform:uppercase}
+.pnl-hint{color:var(--dim);font-size:9px;border:1px solid var(--border);padding:0 4px}
+.fresh{font-size:9px;padding:0 5px;margin-right:4px;border-radius:0}
+.fresh.live{background:rgba(0,200,83,.12);color:var(--green);border:1px solid var(--green)}
+.fresh.wait{background:rgba(255,170,0,.12);color:var(--amber);border:1px solid var(--amber)}
+.fresh.fail{background:rgba(255,23,68,.12);color:var(--red);border:1px solid var(--red)}
+
+.pnl-bd{flex:1;padding:6px 8px;overflow:auto}
+
+/* ---- TABLES ---- */
+table{width:100%;border-collapse:collapse;font-size:11px}
+thead th{text-align:right;color:var(--dim);font-size:9px;text-transform:uppercase;
+  padding:3px 5px;border-bottom:1px solid var(--border);position:sticky;top:0;
+  background:var(--panel);letter-spacing:.5px;font-weight:500}
+thead th:first-child{text-align:left}
+tbody td{text-align:right;padding:2px 5px;border-bottom:1px solid #111;white-space:nowrap}
+tbody td:first-child{text-align:left;color:var(--amber);font-weight:500}
+tbody tr:hover{background:#141414;cursor:pointer}
+.up{color:var(--green)}.dn{color:var(--red)}
+.spark-cell{width:64px;padding:0!important}
+.spark{width:100%;height:18px;display:block}
+
+/* ---- CARDS ---- */
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px}
+.card{background:#0f0f0f;border:1px solid var(--border);
+  border-left:3px solid var(--border-amber);padding:5px 7px}
+.card:hover{border-left-color:var(--cyan)}
+.card .nm{color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:.5px}
+.card .px{color:var(--text);font-size:15px;font-weight:700;margin:1px 0}
+.card .ch{font-size:10px}
+
+/* ---- CHART ---- */
+.chart-ctl{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+select,button{background:#0f0f0f;color:var(--text);border:1px solid var(--border);
+  padding:3px 8px;font-family:var(--mono);font-size:11px;cursor:pointer}
+select:focus{outline:1px solid var(--cyan)}
+.btn{background:var(--border-amber);color:#000;font-weight:700;border:none}
+.btn:hover{background:#ffc040}
+.chart-box{position:relative;height:360px;background:#050505;border:1px solid var(--border);padding:2px}
+
+/* ---- NEWS ---- */
+.news-item{padding:6px 0;border-bottom:1px solid #111}
+.news-item:hover{background:#141414}
+.news-item a{color:var(--text);text-decoration:none;font-size:11px}
+.news-item a:hover{color:var(--cyan)}
+.news-meta{color:var(--dim);font-size:9px;margin-top:2px}
+
+/* ---- COMMAND ---- */
+.cmd{display:flex;align-items:center;gap:6px;background:var(--header);
+  border-top:2px solid var(--border-amber);padding:6px 12px;
+  position:sticky;bottom:0;z-index:100;flex-wrap:wrap}
+.cmd-p{color:var(--amber);font-weight:700;font-size:14px}
+.cmd-in{flex:1;min-width:150px;background:#0a0a0a;border:1px solid var(--border);
+  color:var(--text);font-family:var(--mono);font-size:12px;padding:4px 8px}
+.cmd-in:focus{outline:none;border-color:var(--amber);box-shadow:0 0 8px rgba(255,170,0,.15)}
+.cmd-go{background:var(--border-amber);color:#000;border:none;
+  padding:4px 14px;font-family:var(--mono);font-weight:700;font-size:11px;cursor:pointer}
+.cmd-go:hover{background:#ffc040}
+.cmd-help{color:var(--dim);font-size:9px}
+
+/* ---- SCROLLBAR ---- */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:#0a0a0a}
+::-webkit-scrollbar-thumb{background:#333}
+::-webkit-scrollbar-thumb:hover{background:#555}
+
+/* ---- RESPONSIVE ---- */
+@media(max-width:1200px){.grid{grid-template-columns:repeat(2,1fr)}
+  .pnl.g4{grid-column:span 2}.pnl.g2{grid-column:span 2}}
+@media(max-width:700px){.grid{grid-template-columns:1fr}
+  .pnl.g2,.pnl.g4{grid-column:span 1}
+  .clocks{display:none}.logo{font-size:12px}
+  .card-grid{grid-template-columns:repeat(2,1fr)}
+  table{font-size:10px}
+  thead th:nth-child(4),tbody td:nth-child(4),
+  thead th:nth-child(5),tbody td:nth-child(5){display:none}}
+</style>
+</head>
+<body>
+
+<!-- BOOT -->
+<div id="boot"><pre id="bootTxt"></pre></div>
+
+<!-- HEADER -->
+<header class="hdr">
+  <span class="logo">[Terminal.] v8</span>
+  <div class="clocks">
+    <span class="clk" id="cUTC">UTC --:--:--</span>
+    <span class="clk" id="cWIB">WIB --:--:--</span>
+    <span class="clk" id="cEST">EST --:--:--</span>
+  </div>
+  <div class="hdr-right">
+    <span class="dot" id="connDot">●</span>
+    <span class="status-txt" id="connTxt">CONNECTING</span>
+    <span class="last-upd" id="lastUpd">--</span>
+  </div>
+</header>
+
+<!-- TICKER -->
+<div class="tape"><div class="tape-inner" id="tape">LOADING...</div></div>
+
+<!-- MAIN GRID -->
+<main class="grid">
+
+  <!-- CRYPTO -->
+  <section class="pnl g2" id="p-crypto">
+    <div class="pnl-hd"><span class="pnl-title">Crypto — Binance WS</span>
+      <span><span class="fresh wait" id="fCrypto">WAIT</span><span class="pnl-hint">F1</span></span></div>
+    <div class="pnl-bd"><table>
+      <thead><tr><th>PAIR</th><th>LAST</th><th>CHG%</th><th>HIGH</th><th>LOW</th></tr></thead>
+      <tbody id="tbCrypto"><tr><td colspan="5" style="color:#666">Menunggu WebSocket...</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <!-- COMMODITIES -->
+  <section class="pnl g1" id="p-commodity">
+    <div class="pnl-hd"><span class="pnl-title">Commodities</span>
+      <span><span class="fresh wait" id="fCommodity">WAIT</span><span class="pnl-hint">F2</span></span></div>
+    <div class="pnl-bd"><div class="card-grid" id="gCommodity">
+      <div style="color:#666;padding:10px">Loading...</div>
+    </div></div>
+  </section>
+
+  <!-- FOREX -->
+  <section class="pnl g1" id="p-forex">
+    <div class="pnl-hd"><span class="pnl-title">Forex</span>
+      <span><span class="fresh wait" id="fForex">WAIT</span><span class="pnl-hint">F3</span></span></div>
+    <div class="pnl-bd"><table>
+      <thead><tr><th>PAIR</th><th>RATE</th><th>INV</th><th>SRC</th></tr></thead>
+      <tbody id="tbForex"><tr><td colspan="4" style="color:#666">Loading...</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <!-- TREASURY -->
+  <section class="pnl g2" id="p-treasury">
+    <div class="pnl-hd"><span class="pnl-title">US Treasury — Fiscal Data</span>
+      <span><span class="fresh wait" id="fTreasury">WAIT</span><span class="pnl-hint">F4</span></span></div>
+    <div class="pnl-bd"><div class="card-grid" id="gTreasury">
+      <div style="color:#666;padding:10px">Loading...</div>
+    </div></div>
+  </section>
+
+  <!-- CFTC -->
+  <section class="pnl g2" id="p-cftc">
+    <div class="pnl-hd"><span class="pnl-title">CFTC — Commitments of Traders</span>
+      <span><span class="fresh wait" id="fCFTC">WAIT</span><span class="pnl-hint">F5</span></span></div>
+    <div class="pnl-bd" id="cftcBody"><div style="color:#666;padding:10px">Loading...</div></div>
+  </section>
+
+  <!-- SEC -->
+  <section class="pnl g4" id="p-sec">
+    <div class="pnl-hd"><span class="pnl-title">SEC Insider — Form 4</span>
+      <span><span class="fresh wait" id="fSEC">WAIT</span><span class="pnl-hint">F6</span></span></div>
+    <div class="pnl-bd" id="secBody"><div style="color:#666;padding:10px">Loading...</div></div>
+  </section>
+
+  <!-- HYPERLIQUID -->
+  <section class="pnl g4" id="p-hl">
+    <div class="pnl-hd"><span class="pnl-title">Hyperliquid — Whale Tracker</span>
+      <span><span class="fresh wait" id="fHL">WAIT</span><span class="pnl-hint">F7</span></span></div>
+    <div class="pnl-bd" id="hlBody"><div style="color:#666;padding:10px">Loading...</div></div>
+  </section>
+
+  <!-- INDICES -->
+  <section class="pnl g4" id="p-indices">
+    <div class="pnl-hd"><span class="pnl-title">Global Indices</span>
+      <span><span class="fresh wait" id="fIndices">WAIT</span><span class="pnl-hint">F8</span></span></div>
+    <div class="pnl-bd"><div class="card-grid" id="gIndices">
+      <div style="color:#666;padding:10px">Loading...</div>
+    </div></div>
+  </section>
+
+  <!-- IDX -->
+  <section class="pnl g2" id="p-idx">
+    <div class="pnl-hd"><span class="pnl-title">IDX Watchlist</span>
+      <span><span class="fresh wait" id="fIDX">WAIT</span><span class="pnl-hint">F9</span></span></div>
+    <div class="pnl-bd"><table>
+      <thead><tr><th>TICKER</th><th>LAST</th><th>CHG%</th><th>HIGH</th><th>LOW</th><th>TREND</th></tr></thead>
+      <tbody id="tbIDX"><tr><td colspan="6" style="color:#666">Loading...</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <!-- US -->
+  <section class="pnl g2" id="p-us">
+    <div class="pnl-hd"><span class="pnl-title">US Watchlist</span>
+      <span><span class="fresh wait" id="fUS">WAIT</span><span class="pnl-hint">F10</span></span></div>
+    <div class="pnl-bd"><table>
+      <thead><tr><th>TICKER</th><th>LAST</th><th>CHG%</th><th>HIGH</th><th>LOW</th><th>TREND</th></tr></thead>
+      <tbody id="tbUS"><tr><td colspan="6" style="color:#666">Loading...</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <!-- CHART -->
+  <section class="pnl g4" id="p-chart">
+    <div class="pnl-hd"><span class="pnl-title">Chart — <span id="chartSym">---</span></span>
+      <span class="pnl-hint">F11</span></div>
+    <div class="pnl-bd">
+      <div class="chart-ctl">
+        <select id="chartSel"><option value="">-- PILIH ASET --</option></select>
+        <button class="btn" onclick="renderChart()">PLOT</button>
+        <button class="btn" onclick="loadAll()">REFRESH ALL</button>
+      </div>
+      <div class="chart-box"><div id="chartCanvas" style="width:100%;height:100%"></div></div>
+    </div>
+  </section>
+
+  <!-- NEWS -->
+  <section class="pnl g4" id="p-news">
+    <div class="pnl-hd"><span class="pnl-title">📰 Financial News</span>
+      <span class="pnl-hint">F12</span></div>
+    <div class="pnl-bd" id="newsBody"><div style="color:#666;padding:10px">Loading...</div></div>
+  </section>
+
+</main>
+
+<!-- COMMAND -->
+<footer class="cmd">
+  <span class="cmd-p">&gt;</span>
+  <input class="cmd-in" id="cmdIn" placeholder="CRYPTO, FOREX, TREASURY, CFTC, SEC, HL, CHART BTC, NEWS..." autocomplete="off">
+  <button class="cmd-go" onclick="execCmd()">GO</button>
+  <span class="cmd-help">TYPE HELP</span>
+</footer>
+
+<script>
+/* ============================================================
+   [Terminal.] v8 — Real-time Bloomberg-style dashboard
+   Sumber data: Binance WS, open.er-api.com, Frankfurter,
+   US Treasury, CFTC, SEC EDGAR, Hyperliquid.
+   ============================================================ */
+
+const $ = id => document.getElementById(id);
+const WATCHLIST_IDX = ['BBCA.JK','BBRI.JK','BMRI.JK','TLKM.JK','ASII.JK','UNVR.JK','ICBP.JK','INDF.JK','GOTO.JK','ANTM.JK'];
+const WATCHLIST_US = ['AAPL','MSFT','GOOGL','NVDA','TSLA','AMZN','META'];
+const FOREX_PAIRS = [
+  {pair:'USD/IDR',from:'USD',to:'IDR'},{pair:'EUR/USD',from:'EUR',to:'USD'},
+  {pair:'USD/JPY',from:'USD',to:'JPY'},{pair:'GBP/USD',from:'GBP',to:'USD'},
+  {pair:'USD/CNY',from:'USD',to:'CNY'},{pair:'AUD/USD',from:'AUD',to:'USD'},
+];
+const INDICES = {'IHSG':'^JKSE','S&P500':'^GSPC','NASDAQ':'^IXIC','DOW':'^DJI','NIKKEI':'^N225','HSI':'^HSI'};
+
+const marketData = {crypto:{},forex:{},commodities:{},indices:{},idx:{},us:{},treasury:null,cftc:null,sec:null,hl:null,news:null};
+let chart=null, candleSeries=null, isFetching=false;
+let binanceWs=null, wsRetry=0;
+
+/* ================= BOOT ================= */
+const BOOT = [
+  '[Terminal.] v8 — Real-time Bloomberg Terminal',
+  '==============================================',
+  '> Binance WebSocket ......... INIT',
+  '> Forex (open.er-api) ....... INIT',
+  '> Treasury / CFTC / SEC ..... INIT',
+  '> Hyperliquid ............... INIT',
+  '> Lightweight Charts v5 ..... INIT',
+  '> Ready.',
+  '',
+  'TAP TO CONTINUE',
+];
+function runBoot(){
+  const el=$('bootTxt'); let i=0;
+  (function type(){
+    if(i<BOOT.length){el.textContent+=BOOT[i]+'\n';i++;setTimeout(type,35);}
+    else setTimeout(()=>{$('boot').classList.add('hidden');init();},250);
+  })();
+}
+
+/* ================= INIT ================= */
+function init(){
+  startClocks();
+  connectBinance();          // real-time crypto + PAXG (gold proxy)
+  loadAll();                 // snapshot + polling untuk non-crypto
+  setInterval(loadAll, 120000);
+  $('cmdIn').addEventListener('keydown', e=>{if(e.key==='Enter')execCmd();});
+  $('boot').addEventListener('click',()=>$('boot').classList.add('hidden'));
+}
+
+/* ================= CLOCKS ================= */
+function startClocks(){
+  const fmt=(tz)=>new Date().toLocaleTimeString('en-GB',{timeZone:tz,hour12:false});
+  const tick=()=>{$('cUTC').textContent='UTC '+fmt('UTC');
+    $('cWIB').textContent='WIB '+fmt('Asia/Jakarta');
+    $('cEST').textContent='EST '+fmt('America/New_York');};
+  tick(); setInterval(tick,1000);
+}
+
+/* ================= FETCH HELPERS ================= */
+function fetchTimeout(url, ms=10000, opts={}){
+  const c=new AbortController(); const t=setTimeout(()=>c.abort(),ms);
+  return fetch(url,{signal:c.signal,cache:'no-store',...opts}).finally(()=>clearTimeout(t));
+}
+
+async function fetchProxy(url, type='json'){
+  const proxies=[
+    u=>'https://corsproxy.io/?url='+encodeURIComponent(u),
+    u=>'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u),
+    u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),
+  ];
+  for(const p of proxies){
+    try{
+      const r=await fetchTimeout(p(url),10000);
+      if(!r.ok) continue;
+      if(type==='json') return await r.json();
+      return await r.text();
+    }catch(e){continue;}
+  }
+  throw new Error('All proxies failed');
+}
+
+async function fetchYahoo(ticker){
+  try{
+    const url='https://query1.finance.yahoo.com/v8/finance/chart/'+
+      encodeURIComponent(ticker)+'?interval=15m&range=1d';
+    const data=await fetchProxy(url,'json');
+    const res=data.chart?.result?.[0]; if(!res) throw new Error('no result');
+    const q=res.indicators.quote[0];
+    const closes=q.close||[], opens=q.open||[], highs=q.high||[], lows=q.low||[];
+    let last=closes.length-1; while(last>=0&&closes[last]==null)last--;
+    if(last<0) throw new Error('no close');
+    let first=0; while(first<closes.length&&closes[first]==null)first++;
+    const price=closes[last], firstClose=closes[first]||price;
+    return {
+      price:round4(price), open:round4(opens[last]||price),
+      high:round4(highs[last]||price), low:round4(lows[last]||price),
+      change_pct:round2(((price-firstClose)/firstClose)*100),
+      sparkline:closes.slice(Math.max(0,last-40),last+1).filter(x=>x!=null),
+    };
+  }catch(e){console.warn('Yahoo fail',ticker,e.message);return null;}
+}
+
+async function fetchBatch(items,fn,concurrency=4){
+  const out=[];
+  for(let i=0;i<items.length;i+=concurrency){
+    out.push(...(await Promise.all(items.slice(i,i+concurrency).map(fn))));
+    if(i+concurrency<items.length) await new Promise(r=>setTimeout(r,80));
+  }
+  return out;
+}
+
+/* ================= BINANCE WEBSOCKET ================= */
+function connectBinance(){
+  const streams=['btcusdt@ticker','ethusdt@ticker','solusdt@ticker','bnbusdt@ticker',
+    'xrpusdt@ticker','adausdt@ticker','dogeusdt@ticker','paxgusdt@ticker'];
+  const url='wss://stream.binance.com:9443/stream?streams='+streams.join('/');
+  binanceWs=new WebSocket(url);
+
+  binanceWs.onopen=()=>{
+    console.log('[Binance] connected'); wsRetry=0;
+    setFresh('fCrypto','live'); setConn('live');
+  };
+
+  binanceWs.onmessage=ev=>{
+    const msg=JSON.parse(ev.data);
+    if(!msg.data||!msg.data.s) return;
+    const d=msg.data;
+    const sym=d.s.replace('USDT',''); // BTC, ETH, PAXG ...
+    marketData.crypto[sym]={
+      price:parseFloat(d.c), high:parseFloat(d.h), low:parseFloat(d.l),
+      change_pct:parseFloat(d.P), volume:parseFloat(d.v),
+    };
+    // PAXG = gold proxy → map ke commodities
+    if(sym==='PAXG'){
+      marketData.commodities['XAU/USD']={name:'Gold (PAXG)',price:parseFloat(d.c),
+        change_pct:parseFloat(d.P),unit:'oz'};
+      renderCommodities();
+    }
+    renderCrypto();
+    updateTape();
+  };
+
+  binanceWs.onclose=()=>{
+    console.warn('[Binance] closed'); setFresh('fCrypto','fail');
+    const delay=Math.min(1000*Math.pow(2,wsRetry),30000); wsRetry++;
+    setTimeout(connectBinance,delay);
+  };
+
+  binanceWs.onerror=e=>{console.error('[Binance] error',e); binanceWs.close();};
+}
+
+/* ================= CRYPTO ================= */
+function renderCrypto(){
+  const tb=$('tbCrypto');
+  const e=Object.entries(marketData.crypto);
+  if(!e.length){tb.innerHTML='<tr><td colspan="5" style="color:#666">Menunggu WebSocket...</td></tr>';return;}
+  tb.innerHTML=e.map(([s,q])=>{
+    const up=q.change_pct>=0, cls=up?'up':'dn', sign=up?'+':'';
+    return `<tr onclick="quickChart('${s}')"><td>${s}/USD</td>
+      <td>$${fmtPrice(q.price)}</td>
+      <td class="${cls}">${sign}${q.change_pct.toFixed(2)}%</td>
+      <td>${fmtPrice(q.high)}</td><td>${fmtPrice(q.low)}</td></tr>`;
+  }).join('');
+}
+
+/* ================= COMMODITIES ================= */
+async function loadCommodities(){
+  // Gold sudah dari PAXG WS; silver & oil via Yahoo
+  try{
+    const [silver,oil]=await Promise.all([fetchYahoo('SI=F'),fetchYahoo('CL=F')]);
+    if(silver) marketData.commodities['XAG/USD']={name:'Silver',price:silver.price,
+      change_pct:silver.change_pct,unit:'oz'};
+    if(oil) marketData.commodities['WTI']={name:'Crude Oil WTI',price:oil.price,
+      change_pct:oil.change_pct,unit:'bbl'};
+    renderCommodities(); setFresh('fCommodity','live');
+  }catch(e){console.warn('Commodities',e);setFresh('fCommodity','fail');}
+}
+
+function renderCommodities(){
+  const g=$('gCommodity');
+  const e=Object.entries(marketData.commodities);
+  if(!e.length){g.innerHTML='<div style="color:#666;padding:10px">Loading...</div>';return;}
+  g.innerHTML=e.map(([s,q])=>{
+    const up=q.change_pct>=0, cls=up?'up':'dn', sign=up?'+':'';
+    return `<div class="card"><div class="nm">${q.name||s}</div>
+      <div class="px">$${fmtPrice(q.price)}</div>
+      <div class="ch ${cls}">${sign}${(q.change_pct||0).toFixed(2)}%</div></div>`;
+  }).join('');
+}
+
+/* ================= FOREX ================= */
+async function loadForex(){
+  try{
+    const r=await fetchTimeout('https://open.er-api.com/v6/latest/USD',8000);
+    const d=await r.json();
+    if(d.result!=='success') throw new Error('er-api fail');
+    FOREX_PAIRS.forEach(fp=>{
+      let rate=null;
+      if(fp.from==='USD') rate=d.rates[fp.to];
+      else if(fp.to==='USD'&&d.rates[fp.from]) rate=1/d.rates[fp.from];
+      if(rate) marketData.forex[fp.pair]={rate:round4(rate),date:d.time_last_update_utc,src:'ER-API'};
+    });
+    setFresh('fForex','live');
+  }catch(e){
+    // fallback Frankfurter
+    try{
+      const r=await fetchTimeout('https://api.frankfurter.dev/v1/latest?base=USD&symbols=IDR,EUR,JPY,GBP,CNY,AUD',8000);
+      const d=await r.json();
+      FOREX_PAIRS.forEach(fp=>{
+        let rate=null;
+        if(fp.from==='USD') rate=d.rates[fp.to];
+        else if(fp.to==='USD'&&d.rates[fp.from]) rate=1/d.rates[fp.from];
+        if(rate) marketData.forex[fp.pair]={rate:round4(rate),date:d.date,src:'Frankfurter'};
+      });
+      setFresh('fForex','live');
+    }catch(e2){console.warn('Forex',e2);setFresh('fForex','fail');}
+  }
+  renderForex();
+}
+
+function renderForex(){
+  const tb=$('tbForex');
+  const e=Object.entries(marketData.forex);
+  if(!e.length){tb.innerHTML='<tr><td colspan="4" style="color:#666">Loading...</td></tr>';return;}
+  tb.innerHTML=e.map(([p,q])=>{
+    const inv=q.rate?round4(1/q.rate):0;
+    return `<tr><td>${p}</td><td>${fmtPrice(q.rate)}</td>
+      <td style="color:#666">${fmtPrice(inv)}</td>
+      <td style="color:#666;font-size:9px">${q.src}</td></tr>`;
+  }).join('');
+}
+
+/* ================= TREASURY ================= */
+async function loadTreasury(){
+  const t={debt:null,rates:[]};
+  try{
+    const u='https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny?sort=-record_date&page%5Bsize%5D=1';
+    const r=await fetchTimeout(u,9000);
+    const d=await r.json();
+    if(d.data?.[0]){const row=d.data[0];t.debt={date:row.record_date,
+      total:parseFloat(row.tot_pub_debt_out_amt)||0,
+      public:parseFloat(row.debt_held_public_amt)||0,
+      intragov:parseFloat(row.intragov_hold_amt)||0};}
+  }catch(e){console.warn('Treasury debt',e);}
+
+  try{
+    const u='https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates?sort=-record_date&page%5Bsize%5D=20';
+    const r=await fetchTimeout(u,9000);
+    const d=await r.json();
+    if(d.data){
+      const seen=new Set();
+      for(const row of d.data){
+        const k=row.security_type_desc;
+        if(!seen.has(k)&&t.rates.length<6){seen.add(k);
+          t.rates.push({type:k,rate:parseFloat(row.avg_interest_rate_amt)||0,date:row.record_date});}
+      }
+    }
+  }catch(e){console.warn('Treasury rates',e);}
+
+  if(t.debt||t.rates.length){marketData.treasury=t;renderTreasury();setFresh('fTreasury','live');}
+  else setFresh('fTreasury','fail');
+}
+
+function renderTreasury(){
+  const g=$('gTreasury'),t=marketData.treasury; if(!t)return;
+  let h='';
+  if(t.debt) h+=`<div class="card"><div class="nm">US National Debt</div>
+    <div class="px">$${fmtNum(t.debt.total)}</div>
+    <div class="ch" style="color:#666">Per ${t.debt.date}</div></div>
+    <div class="card"><div class="nm">Debt Held by Public</div>
+    <div class="px">$${fmtNum(t.debt.public)}</div>
+    <div class="ch" style="color:#666">Public</div></div>
+    <div class="card"><div class="nm">Intragovernmental</div>
+    <div class="px">$${fmtNum(t.debt.intragov)}</div>
+    <div class="ch" style="color:#666">Gov accounts</div></div>`;
+  t.rates.forEach(r=>{
+    h+=`<div class="card"><div class="nm">${r.type}</div>
+      <div class="px">${r.rate.toFixed(3)}%</div>
+      <div class="ch" style="color:#666">Avg · ${r.date}</div></div>`;
+  });
+  g.innerHTML=h||'<div style="color:#666;padding:10px">No data</div>';
+}
+
+/* ================= CFTC ================= */
+async function loadCFTC(){
+  try{
+    const u='https://publicreporting.cftc.gov/resource/gpe5-46if.json?$order=report_date_as_yyyy_mm_dd%20DESC&$limit=100';
+    const r=await fetchTimeout(u,9000);
+    const data=await r.json();
+    const by={};
+    for(const row of data){
+      const n=row.contract_market_name||row.market_and_exchange_names; if(!n)continue;
+      if(!by[n]) by[n]=row;
+    }
+    const markets=Object.values(by).filter(x=>x.open_interest_all!=null).slice(0,12)
+      .map(x=>({name:x.contract_market_name||x.market_and_exchange_names||'?',
+        date:(x.report_date_as_yyyy_mm_dd||'').split('T')[0],
+        oi:parseFloat(x.open_interest_all)||0,
+        long:parseFloat(x.noncomm_positions_long_all)||0,
+        short:parseFloat(x.noncomm_positions_short_all)||0}));
+    if(!markets.length) throw new Error('no markets');
+    marketData.cftc={markets}; renderCFTC(); setFresh('fCFTC','live');
+  }catch(e){console.warn('CFTC',e);setFresh('fCFTC','fail');}
+}
+
+function renderCFTC(){
+  const el=$('cftcBody'),c=marketData.cftc;
+  if(!c||!c.markets?.length){el.innerHTML='<div style="color:#666;padding:10px">No data</div>';return;}
+  let h=`<div style="font-size:9px;color:#666;margin-bottom:6px">Update: ${c.markets[0].date||'--'}</div>
+    <table><thead><tr><th style="text-align:left">MARKET</th><th>OI</th><th>LONG</th><th>SHORT</th><th>NET</th><th style="min-width:100px">POS</th></tr></thead><tbody>`;
+  c.markets.forEach(m=>{
+    const net=m.long-m.short, nc=net>=0?'up':'dn';
+    const tot=m.long+m.short||1, lp=(m.long/tot)*100, sp=100-lp;
+    h+=`<tr><td>${m.name.substring(0,26)}</td><td>${fmtVol(m.oi)}</td>
+      <td class="up">${fmtVol(m.long)}</td><td class="dn">${fmtVol(m.short)}</td>
+      <td class="${nc}">${net>=0?'+':''}${fmtVol(net)}</td>
+      <td style="padding:3px 5px"><div style="display:flex;height:12px;border:1px solid #222">
+        <div style="width:${lp}%;background:var(--green)"></div>
+        <div style="width:${sp}%;background:var(--red)"></div>
+      </div><div style="display:flex;justify-content:space-between;font-size:9px">
+        <span class="up">${lp.toFixed(0)}%</span><span class="dn">${sp.toFixed(0)}%</span>
+      </div></td></tr>`;
+  });
+  el.innerHTML=h+'</tbody></table>';
+}
+
+/* ================= SEC ================= */
+async function loadSEC(){
+  try{
+    const u='https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&company=&dateb=&owner=include&start=0&count=20&output=atom';
+    const xml=await fetchProxy(u,'text');
+    const doc=new DOMParser().parseFromString(xml,'text/xml');
+    const entries=doc.querySelectorAll('entry'), filings=[];
+    entries.forEach(en=>{
+      const title=en.querySelector('title')?.textContent||'';
+      const upd=en.querySelector('updated')?.textContent||'';
+      const link=en.querySelector('link')?.getAttribute('href')||'';
+      const m=title.match(/4 - (.+?) \(/);
+      filings.push({company:(m?m[1]:title).substring(0,28),date:upd.split('T')[0],link});
+    });
+    if(!filings.length) throw new Error('no filings');
+    marketData.sec=filings; renderSEC(); setFresh('fSEC','live');
+  }catch(e){console.warn('SEC',e);setFresh('fSEC','fail');}
+}
+
+function renderSEC(){
+  const el=$('secBody'),f=marketData.sec;
+  if(!f||!f.length){el.innerHTML='<div style="color:#666;padding:10px">No data</div>';return;}
+  let h=`<div style="font-size:9px;color:#666;margin-bottom:6px">Form 4 · Update: ${f[0].date||'--'}</div>
+    <table><thead><tr><th style="text-align:left">COMPANY</th><th>DATE</th><th>LINK</th></tr></thead><tbody>`;
+  f.slice(0,15).forEach(x=>{
+    h+=`<tr><td>${x.company}</td><td>${x.date}</td>
+      <td><a href="${x.link}" target="_blank" style="color:var(--cyan)">SEC</a></td></tr>`;
+  });
+  el.innerHTML=h+'</tbody></table>';
+}
+
+/* ================= HYPERLIQUID ================= */
+async function loadHL(){
+  try{
+    const r=await fetchTimeout('https://api.hyperliquid.xyz/info',8000,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({type:'metaAndAssetCtxs'})});
+    const data=await r.json();
+    const [meta,ctxs]=data, assets=meta.universe||[], arr=ctxs||[];
+    const rows=[];
+    for(let i=0;i<Math.min(assets.length,30);i++){
+      const a=assets[i],c=arr[i]||{}; if(!a||!c)continue;
+      const oi=parseFloat(c.openInterest)||0, px=parseFloat(c.markPx)||0,
+            fund=parseFloat(c.funding)||0;
+      rows.push({coin:a.name,price:px,oi,oiUsd:oi*px,funding:fund});
+    }
+    rows.sort((a,b)=>b.oiUsd-a.oiUsd);
+    marketData.hl=rows.slice(0,12); renderHL(); setFresh('fHL','live');
+  }catch(e){console.warn('HL',e);setFresh('fHL','fail');}
+}
+
+function renderHL(){
+  const el=$('hlBody'),rows=marketData.hl;
+  if(!rows||!rows.length){el.innerHTML='<div style="color:#666;padding:10px">No data</div>';return;}
+  let h=`<div style="font-size:9px;color:#666;margin-bottom:6px">Top Markets by OI · Live</div>
+    <table><thead><tr><th style="text-align:left">COIN</th><th>PRICE</th><th>OI (USD)</th><th>FUNDING</th></tr></thead><tbody>`;
+  rows.forEach(r=>{
+    const fc=r.funding>=0?'up':'dn';
+    h+=`<tr><td>${r.coin}</td><td>$${fmtPrice(r.price)}</td>
+      <td style="color:var(--cyan);font-weight:700">$${fmtVol(r.oiUsd)}</td>
+      <td class="${fc}">${(r.funding*100).toFixed(4)}%</td></tr>`;
+  });
+  el.innerHTML=h+'</tbody></table>';
+}
+
+/* ================= INDICES & STOCKS ================= */
+async function loadIndices(){
+  const entries=Object.entries(INDICES);
+  const res=await fetchBatch(entries,async([name,ticker])=>{
+    const q=await fetchYahoo(ticker);return{name,q};
+  });
+  let n=0; res.forEach(({name,q})=>{if(q){marketData.indices[name]=q;n++;}});
+  renderIndices(); setFresh('fIndices',n?'live':'fail');
+}
+
+function renderIndices(){
+  const g=$('gIndices'),e=Object.entries(marketData.indices);
+  if(!e.length){g.innerHTML='<div style="color:#666;padding:10px">Loading...</div>';return;}
+  g.innerHTML=e.map(([n,q])=>{
+    const up=q.change_pct>=0,cls=up?'up':'dn',sign=up?'+':'';
+    return `<div class="card"><div class="nm">${n}</div>
+      <div class="px">${fmtNum(q.price)}</div>
+      <div class="ch ${cls}">${sign}${q.change_pct.toFixed(2)}%</div></div>`;
+  }).join('');
+}
+
+async function loadStocks(){
+  const idx=await fetchBatch(WATCHLIST_IDX,async t=>{
+    const q=await fetchYahoo(t);return{sym:t.replace('.JK',''),q};
+  });
+  let c1=0; idx.forEach(({sym,q})=>{if(q){marketData.idx[sym]=q;c1++;}});
+  renderTable('tbIDX',marketData.idx); setFresh('fIDX',c1?'live':'fail');
+
+  const us=await fetchBatch(WATCHLIST_US,async t=>{
+    const q=await fetchYahoo(t);return{sym:t,q};
+  });
+  let c2=0; us.forEach(({sym,q})=>{if(q){marketData.us[sym]=q;c2++;}});
+  renderTable('tbUS',marketData.us); setFresh('fUS',c2?'live':'fail');
+}
+
+function renderTable(id,obj){
+  const tb=$(id),e=Object.entries(obj||{});
+  if(!e.length){tb.innerHTML='<tr><td colspan="6" style="color:#666">Loading...</td></tr>';return;}
+  tb.innerHTML=e.map(([s,q])=>{
+    const up=q.change_pct>=0,cls=up?'up':'dn',sign=up?'+':'';
+    const sid='sp_'+id+'_'+s.replace(/[^a-zA-Z0-9]/g,'');
+    return `<tr onclick="quickChart('${s}')"><td>${s}</td><td>${fmtNum(q.price)}</td>
+      <td class="${cls}">${sign}${q.change_pct.toFixed(2)}%</td>
+      <td>${fmtNum(q.high)}</td><td>${fmtNum(q.low)}</td>
+      <td class="spark-cell"><canvas class="spark" id="${sid}"></canvas></td></tr>`;
+  }).join('');
+  requestAnimationFrame(()=>{
+    e.forEach(([s,q])=>{
+      const sid='sp_'+id+'_'+s.replace(/[^a-zA-Z0-9]/g,'');
+      drawSpark(sid,q.sparkline,q.change_pct>=0);
+    });
+  });
+}
+
+function drawSpark(id,data,up){
+  const c=$(id); if(!c||!data||data.length<2)return;
+  const ctx=c.getContext('2d'),w=c.width=c.offsetWidth*2,h=c.height=c.offsetHeight*2;
+  const mn=Math.min(...data),mx=Math.max(...data),r=mx-mn||1;
+  ctx.clearRect(0,0,w,h);ctx.beginPath();
+  ctx.strokeStyle=up?'#00c853':'#ff1744';ctx.lineWidth=2;
+  data.forEach((p,i)=>{
+    const x=(i/(data.length-1))*w,y=h-((p-mn)/r)*h;
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  });ctx.stroke();
+}
+
+/* ================= NEWS ================= */
+async function loadNews(){
+  try{
+    const rss='https://feeds.content.dowjones.io/public/rss/mw_topstories';
+    const xml=await fetchProxy(rss,'text');
+    const doc=new DOMParser().parseFromString(xml,'text/xml');
+    const items=doc.querySelectorAll('item'), out=[];
+    items.forEach((it,i)=>{
+      if(i>=12)return;
+      out.push({title:it.querySelector('title')?.textContent||'',
+        link:it.querySelector('link')?.textContent||'',
+        date:it.querySelector('pubDate')?.textContent||''});
+    });
+    if(!out.length) throw new Error('no news');
+    marketData.news=out; renderNews();
+  }catch(e){console.warn('News',e);
+    $('newsBody').innerHTML='<div style="color:#666;padding:10px">⚠️ News tidak tersedia</div>';}
+}
+
+function renderNews(){
+  const el=$('newsBody'),n=marketData.news;
+  if(!n||!n.length){el.innerHTML='<div style="color:#666;padding:10px">No news</div>';return;}
+  el.innerHTML=n.map(a=>`<div class="news-item">
+    <a href="${a.link}" target="_blank">${a.title}</a>
+    <div class="news-meta">${a.date||''}</div></div>`).join('');
+}
+
+/* ================= CHART (Lightweight Charts v5) ================= */
+function populateChartSelect(){
+  const sel=$('chartSel'),cur=sel.value;
+  sel.innerHTML='<option value="">-- PILIH ASET --</option>';
+  const groups={CRYPTO:marketData.crypto,COMMODITIES:marketData.commodities,
+    IDX:marketData.idx,US:marketData.us,INDICES:marketData.indices};
+  for(const label in groups){
+    const o=groups[label]; if(!o||!Object.keys(o).length)continue;
+    const og=document.createElement('optgroup'); og.label=label;
+    for(const s in o){const op=document.createElement('option');op.value=s;op.textContent=s;og.appendChild(op);}
+    sel.appendChild(og);
+  }
+  if(cur)sel.value=cur;
+}
+
+function quickChart(sym){
+  populateChartSelect();
+  const sel=$('chartSel');
+  if(!Array.from(sel.options).some(o=>o.value===sym)){console.warn('no chart',sym);return;}
+  sel.value=sym; renderChart();
+  $('p-chart').scrollIntoView({behavior:'smooth'});
+}
+
+async function renderChart(){
+  const sym=$('chartSel').value; if(!sym)return;
+  $('chartSym').textContent=sym;
+  const box=$('chartCanvas');
+  if(chart){chart.remove();chart=null;}
+
+  // Tentukan sumber data
+  const isCrypto=marketData.crypto[sym];
+  let bars=[];
+  try{
+    if(isCrypto){
+      const pair=sym==='PAXG'?'PAXGUSDT':sym+'USDT';
+      const r=await fetchTimeout(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=15m&limit=100`,8000);
+      const d=await r.json();
+      bars=d.map(k=>({time:Math.floor(k[0]/1000),open:+k[1],high:+k[2],low:+k[3],close:+k[4]}));
+    }else{
+      // Yahoo via proxy
+      const ticker=sym.includes('.')?sym:(INDICES[sym]||sym);
+      const url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?interval=15m&range=5d';
+      const data=await fetchProxy(url,'json');
+      const res=data.chart?.result?.[0]; if(!res)throw new Error('no chart');
+      const ts=res.timestamp||[],q=res.indicators.quote[0];
+      for(let i=0;i<ts.length;i++){
+        if(q.close[i]!=null) bars.push({time:ts[i],open:q.open[i],high:q.high[i],low:q.low[i],close:q.close[i]});
+      }
+    }
+    if(!bars.length)throw new Error('empty bars');
+
+    chart=LightweightCharts.createChart(box,{
+      layout:{background:{type:'solid',color:'#000'},textColor:'#ffaa00',fontFamily:'JetBrains Mono'},
+      grid:{vertLines:{color:'#1a1a1a'},horzLines:{color:'#1a1a1a'}},
+      crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+      rightPriceScale:{borderColor:'#2a2a2a'},
+      timeScale:{borderColor:'#2a2a2a',timeVisible:true,secondsVisible:false},
+      width:box.clientWidth,height:box.clientHeight,
+    });
+
+    candleSeries=chart.addSeries(LightweightCharts.CandlestickSeries,{
+      upColor:'#00c853',downColor:'#ff1744',
+      borderUpColor:'#00c853',borderDownColor:'#ff1744',
+      wickUpColor:'#00c853',wickDownColor:'#ff1744',
+    });
+    candleSeries.setData(bars);
+    chart.timeScale().fitContent();
+  }catch(e){console.error('Chart',e);box.innerHTML='<div style="color:#666;padding:20px;text-align:center">Chart data tidak tersedia</div>';}
+}
+
+/* ================= TICKER TAPE ================= */
+function updateTape(){
+  const items=[];
+  const add=(s,q)=>{
+    const up=q.change_pct>=0,cls=up?'up':'dn',sign=up?'+':'';
+    items.push(`<span class="tape-item"><span class="s">${s}</span>
+      <span class="p">${fmtPrice(q.price)}</span>
+      <span class="c ${cls}">${sign}${q.change_pct.toFixed(2)}%</span></span>`);
+  };
+  Object.entries(marketData.crypto).forEach(([k,v])=>add(k,v));
+  Object.entries(marketData.commodities).forEach(([k,v])=>add(k,v));
+  Object.entries(marketData.forex).forEach(([k,v])=>add(k,{price:v.rate,change_pct:0}));
+  Object.entries(marketData.indices).forEach(([k,v])=>add(k,v));
+  Object.entries(marketData.idx).forEach(([k,v])=>add(k,v));
+  Object.entries(marketData.us).forEach(([k,v])=>add(k,v));
+  $('tape').innerHTML=items.length?items.concat(items).join(''):'<span style="color:#666">MENUNGGU DATA...</span>';
+}
+
+/* ================= LOAD ALL ================= */
+async function loadAll(){
+  if(isFetching)return; isFetching=true;
+  setConn('live');
+  await Promise.allSettled([
+    loadCommodities(),loadForex(),loadTreasury(),loadCFTC(),
+    loadSEC(),loadHL(),loadNews(),loadIndices(),loadStocks()
+  ]);
+  populateChartSelect();
+  updateTape();
+  $('lastUpd').textContent='UPD '+new Date().toLocaleTimeString('en-GB',{timeZone:'Asia/Jakarta',hour12:false})+' WIB';
+  isFetching=false;
+}
+
+/* ================= COMMAND ================= */
+function execCmd(){
+  const inp=$('cmdIn'),cmd=inp.value.trim().toUpperCase(); if(!cmd)return;
+  const map={CRYPTO:'p-crypto',FOREX:'p-forex',TREASURY:'p-treasury',CFTC:'p-cftc',
+    SEC:'p-sec',HL:'p-hl',COMMODITY:'p-commodity',IDX:'p-idx',US:'p-us',
+    INDICES:'p-indices',CHART:'p-chart',NEWS:'p-news'};
+  if(cmd==='HELP') console.log('Commands: CRYPTO, FOREX, TREASURY, CFTC, SEC, HL, COMMODITY, IDX, US, INDICES, NEWS, REFRESH, CHART <SYM>');
+  else if(cmd==='REFRESH') loadAll();
+  else if(cmd.startsWith('CHART ')) quickChart(cmd.replace('CHART ','').trim());
+  else if(map[cmd]) $(map[cmd]).scrollIntoView({behavior:'smooth'});
+  else quickChart(cmd);
+  inp.value='';
+}
+
+/* ================= HELPERS ================= */
+function setFresh(id,status){
+  const el=$(id); if(!el)return;
+  el.className='fresh '+(status==='live'?'live':status==='wait'?'wait':'fail');
+  el.textContent=status==='live'?'LIVE':status==='wait'?'WAIT':'FAIL';
+}
+function setConn(status){
+  $('connDot').className='dot '+(status==='live'?'live':'dead');
+  $('connTxt').textContent=status==='live'?'LIVE':'ERROR';
+}
+function fmtNum(n){
+  if(n==null||isNaN(n))return '--';
+  const a=Math.abs(n);
+  if(a>=1e12)return(n/1e12).toFixed(2)+'T';
+  if(a>=1e9)return(n/1e9).toFixed(2)+'B';
+  if(a>=1e6)return(n/1e6).toFixed(2)+'M';
+  if(a>=1e3)return n.toLocaleString('en-US',{maximumFractionDigits:1});
+  return n.toFixed(2);
+}
+function fmtPrice(n){
+  if(n==null||isNaN(n))return '--';
+  const a=Math.abs(n);
+  if(a>=1000)return n.toLocaleString('en-US',{maximumFractionDigits:2});
+  if(a>=1)return n.toFixed(2);
+  if(a>=0.01)return n.toFixed(4);
+  return n.toFixed(6);
+}
+function fmtVol(v){
+  if(!v||isNaN(v))return '--';
+  const a=Math.abs(v);
+  if(a>=1e9)return(v/1e9).toFixed(2)+'B';
+  if(a>=1e6)return(v/1e6).toFixed(2)+'M';
+  if(a>=1e3)return(v/1e3).toFixed(1)+'K';
+  return String(Math.round(v));
+}
+const round2=n=>Math.round(n*100)/100;
+const round4=n=>Math.round(n*10000)/10000;
+
+/* ================= START ================= */
+runBoot();
+</script>
+</body>
+</html>
